@@ -388,12 +388,42 @@ func copyFile(toPath, fromPath string) error {
 }
 
 func listDBTables(names *[]string, gSQL *goqu.TxDatabase) error {
-	err := gSQL.Select("name").From("sqlite_schema").Where(
+	var virtuals []string
+	var shadows []string
+
+	// Get a list of virtual tables
+	gSQL.Select("name").From("sqlite_schema").Where(
 		goqu.C("type").Eq("table"),
-                goqu.C("sql").NotLike("CREATE VIRTUAL TABLE%"),
+		goqu.C("sql").Like("CREATE VIRTUAL TABLE%"),
+		goqu.C("name").NotLike(MarmotPrefix+"%"),
+	).ScanVals(&virtuals)
+
+	// Get shadow tables, see https://www.sqlite.org/vtab.html#xshadowname
+	shadowSelectOr := goqu.Or()
+	for _, v := range virtuals {
+		shadowSelectOr = shadowSelectOr.Append(goqu.C("name").Like(v + "_%"))
+	}
+	shadowSelect := gSQL.Select("name").From("sqlite_schema").Where(
+		goqu.C("type").Eq("table"),
+		goqu.C("name").Like("%_%"),
+		goqu.C("sql").NotLike("CREATE VIRTUAL TABLE%"),
+		goqu.C("name").NotLike(MarmotPrefix+"%"),
+	)
+	shadowSelect.Where(shadowSelectOr).ScanVals(&shadows)
+
+	// Combine virtual tables and shadow tables
+	virtuals = append(virtuals, shadows...)
+
+	selectTables := gSQL.Select("name").From("sqlite_schema").Where(
+		goqu.C("type").Eq("table"),
 		goqu.C("name").NotLike("sqlite_%"),
 		goqu.C("name").NotLike(MarmotPrefix+"%"),
-	).ScanVals(names)
+	)
+	// Exclude all virtual and shadow tables from our list of tables
+	for _, v := range virtuals {
+		selectTables = selectTables.Where(goqu.C("name").NotLike(v))
+	}
+	err := selectTables.ScanVals(names)
 
 	if err != nil {
 		return err
