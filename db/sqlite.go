@@ -390,6 +390,7 @@ func copyFile(toPath, fromPath string) error {
 func listDBTables(names *[]string, gSQL *goqu.TxDatabase) error {
 	err := gSQL.Select("name").From("sqlite_schema").Where(
 		goqu.C("type").Eq("table"),
+                goqu.C("sql").NotLike("CREATE VIRTUAL TABLE%"),
 		goqu.C("name").NotLike("sqlite_%"),
 		goqu.C("name").NotLike(MarmotPrefix+"%"),
 	).ScanVals(names)
